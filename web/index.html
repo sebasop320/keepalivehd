@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <title>KeepAliveHD</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='13' fill='%2310b981'/%3E%3Ccircle cx='16' cy='16' r='5' fill='white'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <section id="login" class="login hidden">
+    <form id="login-form" class="card login-card" autocomplete="on">
+      <h1>KeepAliveHD</h1>
+      <p class="muted">Sign in to manage the drive keepalive.</p>
+      <label>Username
+        <input id="lg-user" name="username" autocomplete="username" required>
+      </label>
+      <label>Password
+        <input id="lg-pass" name="password" type="password" autocomplete="current-password" required>
+      </label>
+      <p id="lg-err" class="error"></p>
+      <button class="btn primary" type="submit">Sign in</button>
+    </form>
+  </section>
+
+  <main id="app" class="hidden">
+    <header class="top">
+      <div class="brand"><span class="dot"></span>KeepAliveHD</div>
+      <div class="top-right">
+        <span id="clock" class="muted"></span>
+        <button id="logout" class="btn ghost" type="button">Sign out</button>
+      </div>
+    </header>
+
+    <section class="grid">
+      <article class="card hero">
+        <h2>Keepalive</h2>
+        <div id="ka-state" class="state">—</div>
+        <p id="ka-reason" class="muted"></p>
+        <div class="seg" role="group" aria-label="Operating mode">
+          <button type="button" data-mode="on">ON</button>
+          <button type="button" data-mode="auto">AUTO</button>
+          <button type="button" data-mode="off">OFF</button>
+        </div>
+        <p class="hint">ON and OFF override the schedule until you choose AUTO.</p>
+        <p id="ka-next" class="muted small"></p>
+      </article>
+
+      <article class="card">
+        <h2>Drive</h2>
+        <dl>
+          <dt>Connection</dt><dd id="d-conn">—</dd>
+          <dt>Mount</dt><dd id="d-mount">—</dd>
+          <dt>Device</dt><dd id="d-dev">—</dd>
+          <dt>Model</dt><dd id="d-model">—</dd>
+        </dl>
+        <p id="d-problem" class="warn-text"></p>
+      </article>
+
+      <article class="card">
+        <h2>Health</h2>
+        <dl>
+          <dt>Temperature</dt><dd><span id="s-temp">—</span> <span id="s-level" class="badge hidden"></span></dd>
+          <dt>HDD state</dt><dd id="s-power">—</dd>
+          <dt>SMART</dt><dd id="s-health">—</dd>
+          <dt>Last polled</dt><dd id="s-age">—</dd>
+        </dl>
+        <button id="probe" class="btn ghost small" type="button">Check now</button>
+        <p class="hint">“Check now” queries the drive and may wake it if it is asleep.</p>
+      </article>
+
+      <article class="card">
+        <h2>Last keepalive</h2>
+        <div id="k-last" class="big">—</div>
+        <p id="k-when" class="muted"></p>
+        <p id="k-err" class="warn-text"></p>
+      </article>
+
+      <article class="card wide">
+        <h2>Schedule</h2>
+        <form id="sched-form" class="sched">
+          <label>Start <input id="sc-start" type="time" required></label>
+          <label>End <input id="sc-end" type="time" required></label>
+          <label>Interval (s) <input id="sc-int" type="number" min="10" max="3600" step="1" required></label>
+          <button class="btn primary" type="submit">Save</button>
+        </form>
+        <p class="hint">The HDD is kept awake from Start to End (server local time, <span id="tz">—</span>). If End is earlier than Start the window crosses midnight.</p>
+      </article>
+
+      <article class="card wide">
+        <div class="row">
+          <h2>Log</h2>
+          <select id="log-level" aria-label="Log detail">
+            <option value="errors">Errors &amp; warnings</option>
+            <option value="events" selected>Events</option>
+            <option value="all">Everything (incl. reads)</option>
+          </select>
+        </div>
+        <ul id="log" class="log"></ul>
+      </article>
+    </section>
+    <footer class="muted small" id="foot"></footer>
+  </main>
+
+  <div id="toast" class="toast hidden" role="status"></div>
+  <script src="/app.js"></script>
+</body>
+</html>
