@@ -160,6 +160,15 @@ $("sched-form").addEventListener("submit", (ev) => {
   });
 });
 
+$("standby").addEventListener("click", () => {
+  if (!confirm("Switch to OFF and send the drive to standby now?\n\nIt will wake on its own when something reads it. Choose AUTO or ON to resume keepalive.")) return;
+  guarded(async () => {
+    $("standby").disabled = true;
+    try { render(await api("/api/standby", {})); toast("Standby command sent; mode is OFF"); await renderLogs(); }
+    finally { $("standby").disabled = false; }
+  });
+});
+
 $("probe").addEventListener("click", () => guarded(async () => {
   $("probe").disabled = true;
   try { render(await api("/api/probe", {})); toast("Drive checked"); }

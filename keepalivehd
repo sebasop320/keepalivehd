@@ -127,6 +127,7 @@ def main():
     sub.add_parser("on", help="keep the HDD awake now, ignoring the schedule")
     sub.add_parser("off", help="stop keepalive now, ignoring the schedule")
     sub.add_parser("auto", help="follow the schedule")
+    sub.add_parser("standby", help="switch to OFF and spin the drive down now")
     p = sub.add_parser("status", help="show current state")
     p.add_argument("--probe", action="store_true",
                    help="query the drive via SMART right now (may wake it if keepalive is stopped)")
@@ -147,6 +148,10 @@ def main():
         r = call({"cmd": "mode", "mode": a.cmd})
         print(f"Mode is now {a.cmd.upper()}.")
         print(f"Keepalive: {r['status']['keepalive']['state']} - {r['status']['keepalive']['reason']}")
+    elif a.cmd == "standby":
+        call({"cmd": "standby"})
+        print("Standby command sent. Mode is now OFF (the drive wakes by itself when something reads it).")
+        print("Run 'keepalivehd auto' or 'keepalivehd on' to resume keepalive.")
     elif a.cmd == "status":
         r = call({"cmd": "status", "probe": a.probe})
         if a.json:

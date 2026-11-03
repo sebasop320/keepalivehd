@@ -62,6 +62,7 @@ keepalivehd auto              # follow the schedule again
 keepalivehd schedule          # show schedule
 keepalivehd schedule set 06:00 23:30 --interval 90
 keepalivehd logs -n 50        # recent events  (--errors, --all)
+keepalivehd standby           # switch to OFF and spin the drive down now (also a dashboard button)
 keepalivehd status --probe    # force a SMART query now (can wake the drive)
 sudo keepalivehd passwd       # new random dashboard password (--set to type your own)
 ```

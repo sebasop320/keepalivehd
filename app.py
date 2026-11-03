@@ -25,6 +25,7 @@ import mmap
 import os
 import re
 import secrets
+import shutil
 import signal
 import socket
 import stat
@@ -634,6 +635,39 @@ class Controller:
         self.ev("info", "Dashboard password changed (all web sessions signed out)")
         return user, pw
 
+    def standby_now(self, source):
+        """Switch to OFF and spin the drive down immediately (STANDBY IMMEDIATE)."""
+        disk = self.refresh_disk(0)
+        if not disk.get("ready"):
+            raise ValueError(f"drive not available: {disk.get('problem')}")
+        prev = self.state["mode"]
+        self.set_mode("off", source)               # otherwise the next keepalive read would wake it
+        th = self.inflight
+        if th is not None and th.is_alive():
+            th.join(5)
+        scfg = self.config["smart"]
+        dtype = ["-d", scfg["device_type"]] if scfg["device_type"] and scfg["device_type"] != "auto" else []
+        dev = disk["device"]
+        rc, out, err = run(["smartctl", *dtype, "-s", "standby,now", dev], timeout=30)
+        tool = "smartctl"
+        ok = rc == 0 and "STANDBY" in out.upper()
+        detail = (err.strip() or out.strip() or "no output").splitlines()[-1] if not ok else ""
+        if not ok and shutil.which("hdparm"):
+            rc, out2, err2 = run(["hdparm", "-y", dev], timeout=30)
+            tool = "hdparm"
+            ok = rc == 0
+            if not ok:
+                detail = (err2.strip() or out2.strip() or detail).splitlines()[-1]
+        if not ok:
+            self.set_mode(prev, source)            # do not leave the user in OFF after a failure
+            self.ev("error", f"Standby command failed on {dev}: {detail}")
+            raise ValueError(f"standby command failed: {detail}")
+        with self.lock:
+            self.smart["power"] = "standby"
+            self.smart["at"] = time.time()
+        self.ev("info", f"Standby command sent to {dev} via {tool}. Mode is OFF; "
+                        "choose AUTO or ON to resume keepalive.")
+
     def probe(self):
         """Force a fresh drive check + SMART query now (may wake the drive)."""
         self.refresh_disk(0)
@@ -1073,6 +1107,9 @@ def make_handler(ctl, auth):
                     ctl.set_schedule(body.get("start", ""), body.get("end", ""),
                                      body.get("interval_seconds", ""), f"web ({ip})")
                     self._json(200, ctl.get_schedule())
+                elif path == "/api/standby":
+                    ctl.standby_now(f"web ({ip})")
+                    self._json(200, ctl.get_status())
                 elif path == "/api/probe":
                     ctl.probe()
                     self._json(200, ctl.get_status())
@@ -1118,6 +1155,9 @@ def handle_control(ctl, req, peer_uid):
         return {"ok": True, "status": ctl.get_status()}
     if cmd == "mode":
         ctl.set_mode(req.get("mode", ""), f"CLI (uid {peer_uid})")
+        return {"ok": True, "status": ctl.get_status()}
+    if cmd == "standby":
+        ctl.standby_now(f"CLI (uid {peer_uid})")
         return {"ok": True, "status": ctl.get_status()}
     if cmd == "schedule":
         return {"ok": True, "schedule": ctl.get_schedule()}
