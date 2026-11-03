@@ -1,0 +1,35 @@
+{
+  "mountpoint": "/mnt/hdd",
+  "expected_usb_id": "",
+  "interval_seconds": 120,
+  "schedule": {
+    "start": "05:00",
+    "end": "22:00"
+  },
+  "read_timeout_seconds": 45,
+  "rotate_offsets": false,
+  "log_successful_reads": true,
+  "smart": {
+    "device_type": "sat",
+    "interval_seconds": 300,
+    "poll_when_inactive": false
+  },
+  "temperature": {
+    "warn": 45,
+    "critical": 50,
+    "protect": 55,
+    "protect_action": "none"
+  },
+  "web": {
+    "host": "0.0.0.0",
+    "port": 8787,
+    "session_hours": 12,
+    "allowed_networks": [
+      "127.0.0.0/8",
+      "10.0.0.0/8",
+      "172.16.0.0/12",
+      "192.168.0.0/16",
+      "169.254.0.0/16"
+    ]
+  }
+}

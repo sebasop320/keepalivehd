@@ -1,0 +1,197 @@
+#!/usr/bin/env python3
+"""keepalivehd - command line client for the KeepAliveHD service.
+
+    keepalivehd on | off | auto
+    keepalivehd status [--probe] [--json]
+    keepalivehd schedule [set START END [--interval SECONDS]]
+    keepalivehd logs [-n N] [--all | --errors]
+    keepalivehd passwd [--set]        (root only)
+"""
+
+import argparse
+import getpass
+import json
+import os
+import socket
+import sys
+import time
+
+SOCKET_FILE = os.environ.get("KEEPALIVEHD_SOCKET", "/run/keepalivehd/control.sock")
+
+
+def call(req, timeout=70):
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.settimeout(timeout)
+    try:
+        s.connect(SOCKET_FILE)
+    except FileNotFoundError:
+        sys.exit("keepalivehd: the service is not running.\n"
+                 "  Check:  systemctl status keepalivehd\n"
+                 "  Logs:   journalctl -u keepalivehd -e")
+    except PermissionError:
+        sys.exit("keepalivehd: permission denied on the control socket.\n"
+                 "  Run with sudo, or add yourself to the 'keepalivehd' group and log in again:\n"
+                 "  sudo usermod -aG keepalivehd $USER")
+    except OSError as exc:
+        sys.exit(f"keepalivehd: cannot connect to the service: {exc}")
+    try:
+        s.sendall(json.dumps(req).encode() + b"\n")
+        data = b""
+        while not data.endswith(b"\n"):
+            chunk = s.recv(65536)
+            if not chunk:
+                break
+            data += chunk
+    except socket.timeout:
+        sys.exit("keepalivehd: the service did not answer in time")
+    finally:
+        s.close()
+    try:
+        resp = json.loads(data.decode())
+    except ValueError:
+        sys.exit("keepalivehd: invalid response from the service")
+    if not resp.get("ok"):
+        sys.exit(f"keepalivehd: {resp.get('error', 'request failed')}")
+    return resp
+
+
+def ago(sec):
+    if sec is None:
+        return "never"
+    if sec < 90:
+        return f"{sec}s ago"
+    if sec < 5400:
+        return f"{sec // 60}m ago"
+    if sec < 172800:
+        return f"{sec // 3600}h ago"
+    return f"{sec // 86400}d ago"
+
+
+def print_status(st):
+    ka, d, sm, sc = st["keepalive"], st["disk"], st["smart"], st["schedule"]
+    state_txt = {"active": "ACTIVE (reading the drive)",
+                 "idle": "INACTIVE (drive may enter standby)",
+                 "waiting": "WAITING (wanted, but drive not available)",
+                 "paused": "PAUSED (temperature protection)"}[ka["state"]]
+    print(f"KeepAliveHD {st['version']}   server time {st['server_time']} ({st['timezone']})")
+    print(f"Mode:           {st['mode'].upper()}")
+    print(f"Keepalive:      {state_txt}")
+    print(f"                {ka['reason']}")
+    print(f"Schedule:       {sc['start']} - {sc['end']}, every {sc['interval_seconds']}s")
+
+    if d["ready"]:
+        conn = f"connected, mounted at {d['mountpoint']} -> {d['device']}"
+        if d.get("model"):
+            conn += f" ({d['model']})"
+        if d.get("usb_id"):
+            conn += f", USB {d['usb_id']}"
+    else:
+        conn = f"NOT READY - {d.get('problem')}"
+    print(f"Disk:           {conn}")
+    print(f"                connected={d['connected']}  mounted={d['mounted']}")
+
+    if sm["temperature"] is not None:
+        lvl = {"ok": "", "warn": "  [WARNING]", "critical": "  [CRITICAL]",
+               "protect": "  [PROTECT LEVEL]"}.get(sm["temperature_level"], "")
+        print(f"Temperature:    {sm['temperature']} C{lvl}   (polled {ago(sm['polled_age'])})")
+    else:
+        print("Temperature:    unknown (not polled yet)")
+    pw = sm["power_state"]
+    note = ""
+    if not sm["polled"] and pw == "unknown":
+        note = "  (not polled; the service avoids querying the drive while keepalive is stopped; " \
+               "use --probe to check now)"
+    elif sm["polled"]:
+        note = f"  (polled {ago(sm['polled_age'])})"
+    print(f"HDD state:      {pw}{note}")
+    if sm.get("health"):
+        print(f"SMART health:   {sm['health']}")
+    last = ka["last_ok"]
+    if last:
+        print(f"Last keepalive: {ago(ka['last_ok_age'])}  ({time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(last))})")
+    else:
+        print("Last keepalive: never")
+    if ka["state"] == "active" and ka["next_read_in"] is not None:
+        print(f"Next read in:   {ka['next_read_in']}s")
+    err = ka.get("last_error")
+    if err:
+        print(f"Last error:     {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(err['ts']))}  {err['msg']}")
+    else:
+        print("Last error:     none")
+
+
+def main():
+    ap = argparse.ArgumentParser(prog="keepalivehd",
+                                 description="Control the KeepAliveHD service.")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("on", help="keep the HDD awake now, ignoring the schedule")
+    sub.add_parser("off", help="stop keepalive now, ignoring the schedule")
+    sub.add_parser("auto", help="follow the schedule")
+    p = sub.add_parser("status", help="show current state")
+    p.add_argument("--probe", action="store_true",
+                   help="query the drive via SMART right now (may wake it if keepalive is stopped)")
+    p.add_argument("--json", action="store_true")
+    p = sub.add_parser("schedule", help="show the schedule, or: schedule set START END [--interval N]")
+    p.add_argument("args", nargs="*")
+    p.add_argument("--interval", type=int)
+    p = sub.add_parser("logs", help="show recent events")
+    p.add_argument("-n", type=int, default=30)
+    g = p.add_mutually_exclusive_group()
+    g.add_argument("--all", action="store_true", help="include every successful read")
+    g.add_argument("--errors", action="store_true", help="warnings and errors only")
+    p = sub.add_parser("passwd", help="reset the dashboard password (root)")
+    p.add_argument("--set", action="store_true", help="type a password instead of generating one")
+    a = ap.parse_args()
+
+    if a.cmd in ("on", "off", "auto"):
+        r = call({"cmd": "mode", "mode": a.cmd})
+        print(f"Mode is now {a.cmd.upper()}.")
+        print(f"Keepalive: {r['status']['keepalive']['state']} - {r['status']['keepalive']['reason']}")
+    elif a.cmd == "status":
+        r = call({"cmd": "status", "probe": a.probe})
+        if a.json:
+            print(json.dumps(r["status"], indent=2))
+        else:
+            print_status(r["status"])
+    elif a.cmd == "schedule":
+        if a.args:
+            if len(a.args) != 3 or a.args[0] != "set":
+                sys.exit("usage: keepalivehd schedule set START END [--interval SECONDS]\n"
+                         "  e.g. keepalivehd schedule set 06:00 23:30 --interval 90")
+            req = {"cmd": "schedule_set", "start": a.args[1], "end": a.args[2]}
+            if a.interval:
+                req["interval_seconds"] = a.interval
+            s = call(req)["schedule"]
+            print("Schedule updated.")
+        else:
+            s = call({"cmd": "schedule"})["schedule"]
+        print(f"Keep HDD awake: {s['start']} - {s['end']}  (server local time)")
+        print(f"Allow standby:  {s['end']} - {s['start']}")
+        print(f"Interval:       {s['interval_seconds']} seconds")
+        if s["start"] == s["end"]:
+            print("(start == end means always active)")
+    elif a.cmd == "logs":
+        lvl = "all" if a.all else "errors" if a.errors else "events"
+        for e in reversed(call({"cmd": "logs", "level": lvl, "limit": a.n})["logs"]):
+            print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(e['ts']))}  "
+                  f"{e['level'].upper():7} {e['msg']}")
+    elif a.cmd == "passwd":
+        req = {"cmd": "passwd"}
+        if a.set:
+            p1 = getpass.getpass("New dashboard password (min 8 chars): ")
+            if p1 != getpass.getpass("Repeat: "):
+                sys.exit("passwords do not match")
+            req["password"] = p1
+        r = call(req)
+        print(f"Dashboard username: {r['username']}")
+        if r.get("password"):
+            print(f"New password:       {r['password']}")
+        else:
+            print("Password updated.")
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except BrokenPipeError:
+        pass
